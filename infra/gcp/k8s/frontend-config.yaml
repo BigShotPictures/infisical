@@ -1,0 +1,11 @@
+# Forces HTTP -> HTTPS redirect at the GCE load balancer.
+# Referenced by the "ssl-redirect" annotation in infisical-values.yaml.
+# See ../DEPLOYMENT.md.
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: ssl-redirect
+  namespace: infisical
+spec:
+  redirectToHttps:
+    enabled: true

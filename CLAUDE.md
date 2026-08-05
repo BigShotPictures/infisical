@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+When writing plans or documentation use:
+ASD-STE100 Simplified Technical English (STE for short)
+
 ## Essential Commands
 
 - `make reviewable-api` / `make reviewable-ui` — lint:fix + type:check (run before PRs)

@@ -1,0 +1,93 @@
+# Helm values for infisical-helm-charts/infisical-standalone.
+# Namespace: infisical
+# Domain: infisical.bigshotpictures.ai
+#
+# This is NOT the generic "infisical" chart in this repo — that one pulls
+# in MongoDB by default. infisical-standalone is the Postgres-based chart
+# (its Chart.yaml `name:` field is "infisical-standalone" even though the
+# source directory upstream is named infisical-standalone-postgres).
+#
+# Image tag: a current tag from https://hub.docker.com/r/infisical/infisical/tags.
+# Versions up to v0.146.0 use a "-postgres" suffix; v0.147.0 onward dropped
+# it (Postgres is the only backend now, so it's a plain "vX.Y.Z" tag) — see
+# docs/self-hosting/guides/mongo-to-postgres.mdx. Never use "latest".
+#
+# See ../DEPLOYMENT.md for the full deploy sequence this file fits into.
+
+infisical:
+  replicaCount: 2
+
+  image:
+    repository: infisical/infisical
+    tag: "v0.162.16"
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+
+  # ENCRYPTION_KEY, AUTH_SECRET, and SITE_URL all come from this one secret
+  # (see ../DEPLOYMENT.md Step 5) via envFrom. This chart only supports a
+  # single secret reference — SMTP vars, once configured, go into this same
+  # secret rather than a separate one.
+  kubeSecretRef: "infisical-secrets"
+
+  resources:
+    requests:
+      cpu: "500m"
+    limits:
+      memory: "1Gi"
+
+  # Chart names the K8s ServiceAccount "<release-name>-infisical" when
+  # serviceAccount.create is true. Our Helm release name is "infisical", so
+  # this becomes "infisical-infisical" — the Workload Identity binding in
+  # ../secrets.tf must reference that exact name (var.k8s_service_account_name).
+  serviceAccount:
+    create: true
+    annotations:
+      iam.gke.io/gcp-service-account: "infisical-gsa@bsp-infisical.iam.gserviceaccount.com"
+
+  podSecurityContext:
+    fsGroup: 1001
+
+ingress:
+  enabled: true
+  ingressClassName: "gce"
+  # Don't deploy the chart's bundled ingress-nginx controller (the
+  # ingress-nginx: subchart) — GKE's native "gce" IngressClass, set above,
+  # handles this instead.
+  nginx:
+    enabled: false
+  annotations:
+    # Required, not redundant with ingressClassName above: GKE's ingress
+    # controller specifically keys off this legacy annotation to decide
+    # whether to process the Ingress at all. Per GKE's own docs, if this
+    # annotation is unset, the controller "takes no action" regardless of
+    # ingressClassName — silently, with no events and no API calls, which
+    # is exactly what left this Ingress permanently address-less. Both
+    # must say "gce" together (the K8s API itself separately validates
+    # that they match when both are present).
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: "infisical-ip"
+    networking.gke.io/managed-certificates: "infisical-cert"
+    networking.gke.io/v1beta1.FrontendConfig: "ssl-redirect"
+  hostName: "infisical.bigshotpictures.ai"
+  # TLS terminates at the GKE-managed certificate (../DEPLOYMENT.md Step 8),
+  # not a chart-managed secretName, so this stays empty.
+  tls: []
+
+# We provide our own Cloud SQL instance (../database.tf) instead of this
+# chart's bundled Bitnami Postgres.
+postgresql:
+  enabled: false
+  useExistingPostgresSecret:
+    enabled: true
+    existingConnectionStringSecret:
+      name: "infisical-secrets"
+      key: "DB_CONNECTION_URI"
+
+# We provide our own Memorystore instance (../redis.tf) instead of this
+# chart's bundled Bitnami Redis. REDIS_URL still reaches the container via
+# kubeSecretRef's envFrom above (redis.enabled=false means this chart won't
+# add its own, conflicting REDIS_URL env entry).
+redis:
+  enabled: false

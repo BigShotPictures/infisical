@@ -1,0 +1,11 @@
+# Google-managed TLS certificate for the Big Shot Pictures Infisical instance.
+# Apply after the Helm install creates the `infisical` namespace.
+# See ../DEPLOYMENT.md.
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: infisical-cert
+  namespace: infisical
+spec:
+  domains:
+    - infisical.bigshotpictures.ai

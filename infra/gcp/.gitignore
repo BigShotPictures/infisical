@@ -1,0 +1,14 @@
+# Local OpenTofu state/plugin cache — never commit, may contain secrets.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Backend config is bucket-specific per operator.
+*.gcs.tfbackend
+
+# May contain project IDs/domains you don't want public; commit your own
+# copy deliberately if you want it tracked.
+terraform.tfvars
+*.auto.tfvars
