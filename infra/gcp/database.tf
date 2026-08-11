@@ -5,7 +5,7 @@ resource "google_sql_database_instance" "this" {
 
   settings {
     tier              = var.db_tier
-    availability_type = "REGIONAL"
+    availability_type = var.db_availability_type
     disk_type         = "PD_SSD"
     disk_size         = var.db_disk_size_gb
     disk_autoresize   = true

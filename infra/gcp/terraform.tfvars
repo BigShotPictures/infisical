@@ -2,12 +2,14 @@ project_id = "bsp-infisical"
 domain     = "infisical.bigshotpictures.ai"
 region     = "us-west1"
 
-# e2-small hit GCE_STOCKOUT in us-west1-a and us-west1-c on two separate
-# apply attempts (us-west1-b had capacity both times). n2-standard-2 is
-# the docs' own "Recommended (Production)" tier anyway, so bumping to it
-# now avoids fighting the stockout and skips a second bump-to-production
-# step later.
-gke_machine_type = "n2-standard-2"
+# e2-small (variables.tf's default) does not have enough allocatable
+# memory per node for the infisical-standalone pods — applying it on
+# 2026-08-11 left both replicas permanently Pending ("Insufficient
+# memory") even after the cluster autoscaler scaled out to its per-zone
+# max, causing a real outage. e2-medium has roughly 2x the allocatable
+# memory per node and comfortably fits the workload; it still saves
+# meaningfully over n2-standard-2.
+gke_machine_type = "e2-medium"
 
 # Skipping Cloudflare for now — no CLOUDFLARE_API_TOKEN needed this way.
 # Point infisical.bigshotpictures.ai at the static IP output by hand once

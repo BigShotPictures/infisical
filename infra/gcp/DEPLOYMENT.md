@@ -148,10 +148,9 @@ Read the plan output. It creates real, billed GCP resources: a VPC, a
 regional GKE cluster, a Cloud SQL instance, a Memorystore Redis instance,
 and a static IP. With `manage_dns = false`, it does not touch Cloudflare —
 you point DNS at the static IP by hand in Step 9. The defaults in
-`variables.tf` are
-the docs' **minimum-spec** tier (`e2-small` nodes, `db-f1-micro`, 1 GB
-Redis) to keep the first apply cheap. See "Production sizing" below before
-you go live with real users.
+`variables.tf` are the docs' **minimum-spec** tier (`e2-small` nodes,
+zonal `db-f1-micro`, `BASIC`-tier 1 GB Redis) to keep the first apply
+cheap. See "Production sizing" below before you go live with real users.
 
 When you are ready:
 
@@ -222,9 +221,26 @@ The `google_service_account.gke_workload` Workload Identity binding in
 Manager entries. This step does not use that binding — it copies the
 values directly with your own `gcloud` credentials. The binding is there so
 you can switch to the Secret Manager CSI driver later without changing
-`secrets.tf`. Re-run the `kubectl create secret` command above (or script
-it) whenever you rotate a value in Secret Manager, since it does not
-auto-sync.
+`secrets.tf`.
+</Note>
+
+<Note>
+After this first manual copy, `secrets.tf`'s `null_resource.sync_k8s_secret`
+keeps `ENCRYPTION_KEY`, `AUTH_SECRET`, `DB_CONNECTION_URI`, and `REDIS_URL`
+in sync automatically: any future `tofu apply` that changes one of these
+values (for example, a Redis tier change that replaces the instance and
+gives it a new host) re-patches `infisical-secrets` and restarts the
+Deployment as part of the same apply. `SITE_URL` and the SMTP keys (Step 6)
+are untouched — they aren't managed by Terraform.
+
+This requires `kubectl` to already be pointed at the cluster (Step 4)
+*at apply time*, on whichever machine runs `tofu apply` — not just once,
+at initial setup. If it isn't, the sync step fails non-fatally (so it
+doesn't block the rest of the apply) but prints a `WARNING:` line in the
+apply output. Do not ignore that warning: it means `infisical-secrets` is
+now stale in exactly the way this resource exists to prevent, and Step 5's
+`kubectl create secret` (or a manual `kubectl rollout restart`) needs to be
+re-run by hand.
 </Note>
 
 ## Step 6: Configure SMTP (email)
@@ -430,13 +446,21 @@ values in `terraform.tfvars` and re-run `tofu apply`:
 gke_machine_type       = "n2-standard-2"
 gke_num_nodes_per_zone = 2
 db_tier                = "db-n1-standard-2"
+db_availability_type   = "REGIONAL"
 redis_memory_size_gb   = 2
+redis_tier             = "STANDARD_HA"
 ```
 
-Note that `db-n1-standard-2` with `availability_type = "REGIONAL"` (already
-set in `database.tf`) runs a synchronous standby replica — this roughly
-doubles the Cloud SQL cost shown in the GCP pricing calculator for a single
-instance.
+
+`db_availability_type = "REGIONAL"` runs a synchronous standby replica —
+this roughly doubles the Cloud SQL cost shown in the GCP pricing
+calculator for a single instance. Only bump it once `db_tier` is a
+dedicated-CPU tier like `db-n1-standard-2`: Google does not cover
+shared-core tiers (`db-f1-micro`, `db-g1-small`) under the Cloud SQL SLA
+even with `REGIONAL` set, so pairing `REGIONAL` with `db-f1-micro` pays
+double for a standby without an SLA guarantee. Same tradeoff shape for
+`redis_tier = "STANDARD_HA"`: roughly doubles the Memorystore cost versus
+`BASIC` in exchange for cross-zone replication and automatic failover.
 
 ## Additional configuration
 

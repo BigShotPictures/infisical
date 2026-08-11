@@ -40,6 +40,53 @@ resource "google_secret_manager_secret_version" "this" {
   secret_data = each.value
 }
 
+locals {
+  # Only the 4 keys below — merge-patched, not a full replace, so SITE_URL
+  # and the SMTP_* keys added by hand (DEPLOYMENT.md Step 6) are untouched.
+  k8s_secret_patch = jsonencode({
+    stringData = {
+      ENCRYPTION_KEY    = random_id.encryption_key.hex
+      AUTH_SECRET       = random_id.auth_secret.b64_std
+      DB_CONNECTION_URI = local.db_connection_uri
+      REDIS_URL         = local.redis_url
+    }
+  })
+}
+
+# Bridges Secret Manager (above) to the native k8s Secret the
+# infisical-standalone Helm chart actually reads (kubeSecretRef in
+# k8s/infisical-values.yaml) — without this, Terraform has no visibility
+# into that Secret at all, so rotating a value here (e.g. replacing the
+# Redis instance, which changes its host) silently goes stale in the
+# cluster until someone remembers to re-run DEPLOYMENT.md Step 5 by hand.
+# That exact gap caused a live outage on 2026-08-11: a Redis tier change
+# replaced the instance, and the stale REDIS_URL in the cluster left both
+# Infisical pods crash-looping on ETIMEDOUT until it was patched manually.
+#
+# Requires kubectl already pointed at the cluster (DEPLOYMENT.md Step 4)
+# at apply time — the `|| echo "WARNING..."` below keeps that requirement
+# from hard-failing the whole apply (expected on the very first apply,
+# before Step 5 has even created the namespace/Secret yet), but still
+# prints a visible warning instead of failing silently, since a wrong
+# kubectl context on a LATER apply would otherwise reintroduce the same
+# silent-staleness bug this exists to prevent.
+resource "null_resource" "sync_k8s_secret" {
+  triggers = {
+    patch = local.k8s_secret_patch
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      kubectl patch secret infisical-secrets -n ${var.k8s_namespace} --type=merge -p '${local.k8s_secret_patch}' \
+        || echo "WARNING: kubectl patch failed. Expected only on the very first apply, before Step 5 creates the Secret. If this is NOT the first apply, infisical-secrets is now stale — check your kubectl context and re-run DEPLOYMENT.md Step 5 by hand."
+      kubectl rollout restart deployment/${var.k8s_deployment_name} -n ${var.k8s_namespace} \
+        || echo "WARNING: kubectl rollout restart failed. Expected only before the Helm install (Step 7) has run once. If Infisical is already installed, its pods are still running with the OLD secret values — restart the deployment by hand."
+    EOT
+  }
+
+  depends_on = [google_secret_manager_secret_version.this]
+}
+
 # Workload Identity: the GSA that GKE pods impersonate to read the secrets
 # above, bound to the Helm chart's Kubernetes service account.
 resource "google_service_account" "gke_workload" {

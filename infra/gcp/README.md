@@ -22,10 +22,12 @@ config itself does; `DEPLOYMENT.md` is the step-by-step guide that also
 covers the parts outside OpenTofu.
 
 The variables in `variables.tf` use the docs' **minimum-spec** values by
-default: `e2-small` nodes, `db-f1-micro`, 1 GB of Redis, 1 node per zone.
-These keep the first `tofu plan` cheap to run. For a production
-deployment, set `gke_machine_type`, `db_tier`, `redis_memory_size_gb`, and
-`gke_num_nodes_per_zone` to the docs' "Recommended (Production)" values.
+default: `e2-small` nodes, `db-f1-micro` (zonal, no standby), `BASIC`
+(single-node) Redis at 1 GB, 1 node per zone. These keep the first `tofu
+plan` cheap to run. For a production deployment, set `gke_machine_type`,
+`db_tier`, `db_availability_type` (`REGIONAL`), `redis_memory_size_gb`,
+`redis_tier` (`STANDARD_HA`), and `gke_num_nodes_per_zone` to the docs'
+"Recommended (Production)" values.
 
 ## Prerequisites
 

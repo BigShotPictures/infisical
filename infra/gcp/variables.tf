@@ -16,6 +16,12 @@ variable "cloudflare_zone_id" {
   default     = null
 }
 
+variable "db_availability_type" {
+  type        = string
+  description = "Cloud SQL availability_type. Defaults to the docs' minimum-spec (ZONAL, no standby) — note that Google does not cover shared-core tiers (db-f1-micro, db-g1-small) under the Cloud SQL SLA even when set to REGIONAL, so REGIONAL only pays for a standby without an SLA guarantee on those tiers. Use REGIONAL once db_tier is a dedicated-CPU tier for production."
+  default     = "ZONAL"
+}
+
 variable "db_disk_size_gb" {
   type        = number
   description = "Initial storage size, in GB, for the Cloud SQL instance. Auto-increases as needed."
@@ -75,6 +81,12 @@ variable "gke_num_nodes_per_zone" {
   default     = 1
 }
 
+variable "k8s_deployment_name" {
+  type        = string
+  description = "Deployment name the infisical-standalone Helm chart creates: \"<helm release name>-infisical-standalone-infisical\". Our release name is \"infisical\", so this is \"infisical-infisical-standalone-infisical\". Used to roll pods after secrets.tf's null_resource.sync_k8s_secret patches infisical-secrets, since env vars only load at container start."
+  default     = "infisical-infisical-standalone-infisical"
+}
+
 variable "k8s_namespace" {
   type        = string
   description = "Kubernetes namespace the Infisical Helm release is installed into. Used to build the Workload Identity binding member string."
@@ -118,8 +130,8 @@ variable "redis_memory_size_gb" {
 
 variable "redis_tier" {
   type        = string
-  description = "Memorystore service tier. STANDARD_HA enables cross-zone replication and automatic failover."
-  default     = "STANDARD_HA"
+  description = "Memorystore service tier. Defaults to the docs' minimum-spec tier (BASIC, single node, no failover) to keep cost down — Infisical only uses Redis for caching/queues, not durable data, so losing it briefly is recoverable. Use STANDARD_HA for cross-zone replication and automatic failover in production."
+  default     = "BASIC"
 }
 
 variable "redis_version" {
