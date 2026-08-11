@@ -65,20 +65,16 @@ kubectl version --client
 tofu version
 ```
 
-### 4. Get a Cloudflare API token
+### 4. DNS is manual for this deployment — no Cloudflare API token needed
 
-The OpenTofu config creates the DNS record for `infisical.bigshotpictures.ai`
-through the Cloudflare API. Create a token with **Zone → DNS → Edit**
-permission, scoped to the `bigshotpictures.ai` zone, in the Cloudflare
-dashboard under **My Profile → API Tokens**.
+`terraform.tfvars` sets `manage_dns = false`. OpenTofu will not touch
+Cloudflare at all; it only reserves the static IP. You point the domain at
+that IP by hand, in Cloudflare's dashboard, after `tofu apply` (Step 9).
+Skip getting a `CLOUDFLARE_API_TOKEN` — nothing in this runbook needs one.
 
-Export it in your shell before you run any `tofu` command:
-
-```bash
-export CLOUDFLARE_API_TOKEN=<your-token>
-```
-
-Do not put this token in a file in this repo.
+`cloudflare_zone_id` stays set in `terraform.tfvars` for a future switch to
+`manage_dns = true` (see `README.md` "DNS"), but nothing reads it while
+`manage_dns` is `false`.
 
 ## Step 1: Create the OpenTofu state bucket
 
@@ -94,24 +90,24 @@ gcloud storage buckets create gs://bsp-infisical-tofu-state \
 gcloud storage buckets update gs://bsp-infisical-tofu-state --versioning
 ```
 
-Create `terraform.gcs.tfbackend` in this folder (`infra/gcp/`). This file is
-gitignored, so it stays local to your machine:
+`terraform.gcs.tfbackend` in this folder already has the real values,
+committed:
 
 ```hcl
 bucket = "bsp-infisical-tofu-state"
 prefix = "infisical"
 ```
 
-## Step 2: Confirm the Cloudflare zone ID
+## Step 2: Zone ID is already set, and unused for now
 
 `terraform.tfvars` in this folder already sets `project_id`, `domain`,
-`region`, and `cloudflare_zone_id`. The zone ID
-(`bb99848f2022831d4ed34ea64331f7fa`) was looked up once and saved — you do
-not need to look it up again.
+`region`, `manage_dns` (`false`), and `cloudflare_zone_id`. The zone ID
+(`bb99848f2022831d4ed34ea64331f7fa`) was looked up once and saved.
 
-Confirm it still matches the live `bigshotpictures.ai` zone before you
-apply, since a stale or wrong zone ID fails at `tofu apply` with a
-Cloudflare 403, not at `tofu plan`:
+Nothing in this deployment reads `cloudflare_zone_id` while `manage_dns` is
+`false` — skip this step. It's only relevant if you later flip
+`manage_dns` to `true` (see `README.md` "DNS"), at which point confirm the
+ID still matches the live `bigshotpictures.ai` zone before you apply:
 
 ```bash
 curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -132,8 +128,9 @@ curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
 <Note>
 A `wrangler login` OAuth token cannot run either `curl` above — it has no
 DNS/zone scope (confirm with `wrangler whoami`). You need a separate,
-scoped Cloudflare API token for this (see "Get a Cloudflare API token"
-above).
+scoped Cloudflare API token for this, with **Zone → DNS → Edit** permission
+on the `bigshotpictures.ai` zone (Cloudflare dashboard → My Profile → API
+Tokens). Do not put this token in a file in this repo.
 </Note>
 
 ## Step 3: Review and apply the OpenTofu plan
@@ -148,8 +145,10 @@ tofu plan
 need `-var` flags.
 
 Read the plan output. It creates real, billed GCP resources: a VPC, a
-regional GKE cluster, a Cloud SQL instance, a Memorystore Redis instance, a
-static IP, and a Cloudflare DNS record. The defaults in `variables.tf` are
+regional GKE cluster, a Cloud SQL instance, a Memorystore Redis instance,
+and a static IP. With `manage_dns = false`, it does not touch Cloudflare —
+you point DNS at the static IP by hand in Step 9. The defaults in
+`variables.tf` are
 the docs' **minimum-spec** tier (`e2-small` nodes, `db-f1-micro`, 1 GB
 Redis) to keep the first apply cheap. See "Production sizing" below before
 you go live with real users.
@@ -349,18 +348,36 @@ is enabled (`gcloud container clusters describe infisical-cluster
 print `{}`, not blank) — `gke.tf` sets this, but it doesn't take effect
 retroactively on a running cluster without a `tofu apply`.
 
-## Step 9: Confirm DNS
+## Step 9: Point DNS at the static IP by hand
 
-OpenTofu already created the Cloudflare A record in Step 3, pointed at the
-reserved static IP. Confirm it:
+With `manage_dns = false`, OpenTofu only reserved the static IP — it did
+not create a DNS record. Get the IP:
 
 ```bash
 tofu output -raw static_ip_address
+```
+
+In the Cloudflare dashboard, under the `bigshotpictures.ai` zone, add:
+
+- **Type**: `A`
+- **Name**: `infisical` (for `infisical.bigshotpictures.ai`)
+- **IPv4 address**: the output above
+- **Proxy status**: **DNS only** (grey-clouded, not orange-clouded)
+
+Proxy status matters, not just DNS resolution: the GKE Ingress's
+Google-managed certificate (Step 8) validates and terminates TLS directly
+against this IP. Cloudflare's proxy would put Cloudflare's edge IP in
+front instead, breaking certificate issuance and renewal — see the comment
+in `dns.tf` for the same constraint on the OpenTofu-managed path.
+
+Confirm it resolves correctly:
+
+```bash
 dig +short infisical.bigshotpictures.ai
 ```
 
-The two values must match. If they do not match yet, wait a few minutes for
-DNS propagation.
+This must match the static IP from `tofu output` above. If it does not
+match yet, wait a few minutes for DNS propagation.
 
 ## Step 10: Verify the deployment
 
@@ -511,7 +528,9 @@ tofu destroy
 ```
 
 `tofu destroy` removes the VPC, GKE cluster, Cloud SQL instance,
-Memorystore instance, static IP, and the Cloudflare DNS record.
+Memorystore instance, and static IP. It does not touch the Cloudflare A
+record you added by hand in Step 9 — delete that yourself in the
+Cloudflare dashboard.
 `deletion_protection = true` on the Cloud SQL resource (`database.tf`)
 blocks accidental destroys of the database — you must remove that line and
 re-apply before `tofu destroy` can delete it.
